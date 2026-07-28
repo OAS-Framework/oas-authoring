@@ -1,0 +1,8 @@
+name: oas-authoring-expert
+kind: persistent
+description: Owner of the official oas.authoring package: capability, skill, soul authoring craft, implementation, releases, and support
+type: package-maintainers
+repo: /Users/pepe-reyero/oas-workspace/oas-authoring
+work: worktree
+runtime: claude
+model: opus
