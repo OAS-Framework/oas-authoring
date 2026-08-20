@@ -65,6 +65,10 @@ function runFixture(t, capabilityDirs, overrides = {}, files = {}, links = {}) {
 }
 
 const TEMPLATE = "name: fixture\n";
+// A single literal backslash, spelled unambiguously. Escaping backslashes
+// through a JS string in a test ABOUT backslash handling is how a fixture ends
+// up asserting something other than what it reads as.
+const BACKSLASH = String.fromCharCode(92);
 const canonicalTemplate = { "config-templates/default/oas-config.yaml": TEMPLATE };
 
 test("validator rejects a missing capability enumeration", (t) => {
@@ -225,7 +229,11 @@ test("validator catches machine paths that quoting or Windows drives would hide"
     ["sequence item", "roots:\n  - /Users/someone/checkout"],
     ["absolute path outside a home dir", "agents-md-injection: /tmp/machine-specific.md"],
     ["absolute path under /opt", "repo: /opt/checkout"],
-    ["UNC path", "repo: \\\\\\\\server\\\\share"],
+    ["UNC path", `repo: ${BACKSLASH.repeat(2)}server${BACKSLASH}share`],
+    // One leading backslash is ALREADY absolute on Windows —
+    // path.win32.isAbsolute("\\Users\\name") is true — so a rule that only
+    // recognised UNC let root-relative Windows paths through.
+    ["windows root-relative single backslash", `agents-md-injection: ${BACKSLASH}Users${BACKSLASH}name${BACKSLASH}machine.md`],
     ["windows drive with forward slashes", "repo: C:/Users/name"],
   ]) {
     const result = runFixture(t, ["capabilities/thing"], {

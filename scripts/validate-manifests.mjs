@@ -106,10 +106,14 @@ function scalarValues(line) {
  * A Windows drive path also carries ONE backslash (C:\\Users\\me), so a pattern
  * requiring two never fires on a real one. */
 function isMachinePath(value) {
-  return /^~([\/\\]|$)/.test(value)          // ~ or ~/checkout
-    || /^\//.test(value)                     // any absolute POSIX path, incl. //server/share
-    || /^\\\\/.test(value)                    // UNC \\\\server\\share
-    || /^[A-Za-z]:([\/\\]|$)/.test(value);   // C:\\… or C:/… or bare C:
+  // One leading backslash is already absolute on Windows: path.win32.isAbsolute
+  // ("\\Users\\me") is true. Requiring TWO matched only UNC and let root-relative
+  // Windows paths through — the same "enumerate a form instead of testing the
+  // property" mistake this function was rewritten to stop making.
+  return /^~([\/\\]|$)/.test(value)        // ~ or ~/checkout
+    || /^\//.test(value)                    // any absolute POSIX path, incl. //server/share
+    || /^\\/.test(value)                    // any leading backslash: root-relative AND UNC
+    || /^[A-Za-z]:([\/\\]|$)/.test(value); // C:\ … or C:/ … or bare C:
 }
 
 // ---- Config templates -------------------------------------------------
