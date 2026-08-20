@@ -1,0 +1,35 @@
+# Reference config template shipped by the oas.authoring package.
+#
+# `oas install` NEVER applies this file. Adoption is explicit:
+#
+#   oas init --package oas.authoring          # fresh scope
+#   oas config adopt oas.authoring            # switch an existing scope
+#
+# Once adopted it is an ordinary, editable oas-config.yaml that you own.
+# Package updates never rewrite it; `oas config diff` and `oas config sync`
+# compare it against the recorded adopted base. Every setting below is a
+# starting point, not policy: retarget, disable, or replace any of it.
+
+name: authoring
+
+agent-types:
+  framework-authors:
+    description: Agents that author OAS capabilities, skills, and souls.
+  package-maintainers:
+    description: Agents that maintain and release OAS distribution packages.
+
+capabilities:
+  # oas.authoring claims no fundamental layer, contributes no commands or
+  # hooks, and requires no host tooling — it is purely additive guidance, so
+  # it needs no `oas trust` step and binds no `layers:` slot here.
+  additive:
+    oas.authoring:
+      from: installed
+      # Targeting is a MAPPING of agent-type name to binding, never a YAML
+      # block sequence. A `- name` list silently parses to an empty mapping,
+      # which acquires the capability and activates it for nobody.
+      agent-types:
+        framework-authors:
+          enabled: true
+        package-maintainers:
+          enabled: true
