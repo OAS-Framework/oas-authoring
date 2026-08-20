@@ -132,3 +132,21 @@ test("the repository's dev package version tracks the distributed package versio
   assert.equal(lock.packages["node_modules/@oas-framework/oas"].version, "0.20.0");
   assert.equal(outer.compatibility.oas, ">=0.20.0");
 });
+
+test("the package gate uses explicit test paths, never unbounded discovery", () => {
+  const repoRoot = resolve(PAYLOAD, "..");
+  const { scripts } = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+  // OAS checkouts grow `agents/<soul>/instances/<id>/work` trees. Bare
+  // `node --test` recurses into them and runs whatever stale sibling suites it
+  // finds there, so the package gate's result would depend on which agents
+  // happened to be alive. Verified: a planted nested suite DID run under bare
+  // discovery and does not under the explicit scripts.
+  assert.doesNotMatch(scripts.test, /node --test\s*(&&|$)/, "`npm test` must not invoke bare `node --test`");
+  for (const step of ["validate", "test:unit", "test:probe"]) {
+    assert.match(scripts.test, new RegExp(`npm run ${step.replace(":", ":")}`), `\`npm test\` must run ${step}`);
+  }
+  for (const [name, script] of Object.entries(scripts)) {
+    if (name === "test" || !script.includes("node --test")) continue;
+    assert.match(script, /node --test\s+\S+/, `${name} must name its test files explicitly`);
+  }
+});

@@ -9,7 +9,7 @@
     "validate": "node scripts/validate-manifests.mjs",
     "test:unit": "node --test test/oas-authoring.test.mjs test/manifest-validation.test.mjs",
     "test:probe": "node --test test/consumer-probe.test.mjs",
-    "test": "npm run validate && node --test"
+    "test": "npm run validate && npm run test:unit && npm run test:probe"
   },
   "repository": {
     "type": "git",

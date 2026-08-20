@@ -86,9 +86,9 @@ test("validator rejects the flat '.' capability root for newly authored packages
   assert.match(result.stderr, /dedicated root such as capabilities\/<slug>/);
 });
 
-test("validator rejects a capability resource that escapes its own capability root", (t) => {
-  // The skill tree is inside the PACKAGE but outside the CAPABILITY root, so
-  // it resolves during development and vanishes after materialization.
+test("validator rejects a '..' capability resource before any boundary check", (t) => {
+  // The cheap lexical guard, kept distinct from the boundary test below: this
+  // one never reaches the containment comparison at all.
   const result = runFixture(t, ["capabilities/thing"], {}, {
     "capabilities/thing/oas.json": JSON.stringify({
       capability: "test.package",
@@ -102,6 +102,30 @@ test("validator rejects a capability resource that escapes its own capability ro
   });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /skills\[0\]: skill path must be package-relative and may not contain '\.\.'/);
+});
+
+test("validator rejects a contained-LOOKING skill path that symlinks out of the capability root", (t) => {
+  // This is the fixture that actually exercises the CAPABILITY-root boundary.
+  // The declared path `skills/leaky` contains no `..` and sits inside the
+  // capability directory, so every lexical guard passes; only resolving the
+  // symlink shows it landing on package-only material that will not survive
+  // materialization. If the boundary is reverted to the package root, this
+  // test goes green again — which is the regression it exists to catch.
+  const result = runFixture(t, ["capabilities/thing"], {}, {
+    "capabilities/thing/oas.json": JSON.stringify({
+      capability: "test.package",
+      version: "1.0.0",
+      compatibility: { oas: ">=0.20.0" },
+      description: "Fixture.",
+      requires: [],
+      skills: ["skills/leaky"],
+    }, null, 2) + "\n",
+    "shared-skills/leaky/SKILL.md": "---\nname: leaky\n---\n",
+  }, {
+    "capabilities/thing/skills/leaky": "shared-skills/leaky",
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /skill path escapes its capability root after symlink resolution — a materialized capability must be self-contained/);
 });
 
 test("validator rejects a manifest carrying both config-template spellings", (t) => {
@@ -199,6 +223,10 @@ test("validator catches machine paths that quoting or Windows drives would hide"
     ["single-quoted unix path", "repo: '/home/someone/checkout'"],
     ["home-relative path", "repo: ~/checkout"],
     ["sequence item", "roots:\n  - /Users/someone/checkout"],
+    ["absolute path outside a home dir", "agents-md-injection: /tmp/machine-specific.md"],
+    ["absolute path under /opt", "repo: /opt/checkout"],
+    ["UNC path", "repo: \\\\\\\\server\\\\share"],
+    ["windows drive with forward slashes", "repo: C:/Users/name"],
   ]) {
     const result = runFixture(t, ["capabilities/thing"], {
       configTemplates: { default: { path: "config-templates/default/oas-config.yaml" } },

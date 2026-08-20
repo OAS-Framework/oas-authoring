@@ -97,13 +97,19 @@ function scalarValues(line) {
   });
 }
 
-/** Is this scalar an absolute path belonging to one machine? Anchored at the
- * value start — a Windows drive path carries ONE backslash (C:\\Users\\me), so a
- * pattern requiring two never fires on a real one. */
+/** Is this scalar an absolute or home-relative path — i.e. one that means
+ * something only on the machine it was written on? Anchored at the value start.
+ *
+ * The boundary is ABSOLUTENESS, not a list of familiar prefixes. An earlier
+ * version enumerated /Users/ and /home/, which let `/tmp/...`, `/opt/...` and
+ * every other absolute path through while looking like it enforced the rule.
+ * A Windows drive path also carries ONE backslash (C:\\Users\\me), so a pattern
+ * requiring two never fires on a real one. */
 function isMachinePath(value) {
-  return /^~[\/\\]/.test(value)
-    || /^\/(Users|home)\//.test(value)
-    || /^[A-Za-z]:[\/\\]/.test(value);
+  return /^~([\/\\]|$)/.test(value)          // ~ or ~/checkout
+    || /^\//.test(value)                     // any absolute POSIX path, incl. //server/share
+    || /^\\\\/.test(value)                    // UNC \\\\server\\share
+    || /^[A-Za-z]:([\/\\]|$)/.test(value);   // C:\\… or C:/… or bare C:
 }
 
 // ---- Config templates -------------------------------------------------
