@@ -1,0 +1,6 @@
+# Repository-only dev tooling. The distributed payload is oas-package/ and
+# never contains any of this.
+node_modules/
+
+# Scratch scopes created by the released-CLI consumer probes.
+.probe/

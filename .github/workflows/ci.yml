@@ -13,10 +13,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The v1.0.0 compatibility probe reads the published payload straight
+          # out of git history; a shallow clone would silently skip it.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Validate manifests and run unit tests
-        run: npm test
-      - name: Consumer probe status
-        run: echo "PENDING(released-0.19.0-fixtures; package-runtime-api.md Consumer fixture) acquire -> lock -> trust -> activate -> spawn"
+          cache: npm
+      # The consumer probes drive the RELEASED @oas-framework/oas CLI, pinned
+      # as a devDependency. `npm ci` installs it from the committed lockfile so
+      # the probed kernel is exactly the one this package claims compatibility
+      # with — the probes assert that version and fail if it is not.
+      - name: Install pinned toolchain
+        run: npm ci
+      - name: Validate manifests
+        run: npm run validate
+      - name: Unit tests
+        run: npm run test:unit
+      - name: Released-CLI consumer probes
+        run: npm run test:probe
+      # The distributed payload is exactly oas-package/. Nothing else may be
+      # reachable from it, and no build residue may live inside it.
+      - name: Payload containment
+        run: |
+          if find oas-package -name node_modules -o -name '.git' -o -name '*.log' | grep -q .; then
+            echo "build residue found inside the distributed payload:"
+            find oas-package -name node_modules -o -name '.git' -o -name '*.log'
+            exit 1
+          fi
+          echo "oas-package/ payload:"
+          find oas-package -type f | sort
