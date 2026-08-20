@@ -74,6 +74,38 @@ const capabilitySchema = readJson(capabilitySchemaPath);
 
 if (packageManifest && packageSchema) validateSchema(packageManifest, packageSchema, "oas-package.json");
 
+/** realpath, or undefined when the path does not exist (callers fall back). */
+function realpathOrUndefined(path) {
+  try { return realpathSync(path); } catch { return undefined; }
+}
+
+/** The scalar value(s) a YAML line carries, comment-stripped and unquoted:
+ * the part after `key:`, a `- item` sequence entry, or a bare continuation.
+ * Deliberately permissive — this feeds a REJECTION check, so over-collecting
+ * is safe and under-collecting is the failure mode that matters. */
+function scalarValues(line) {
+  const withoutComment = line.replace(/(^|\s)#.*$/, "").trim();
+  if (!withoutComment) return [];
+  const values = [withoutComment];
+  const afterKey = withoutComment.match(/^[^:]*:\s*(.+)$/);
+  if (afterKey) values.push(afterKey[1].trim());
+  const sequenceItem = withoutComment.match(/^-\s+(.+)$/);
+  if (sequenceItem) values.push(sequenceItem[1].trim());
+  return values.flatMap((value) => {
+    const unquoted = value.replace(/^["']|["']$/g, "").trim();
+    return unquoted === value ? [value] : [value, unquoted];
+  });
+}
+
+/** Is this scalar an absolute path belonging to one machine? Anchored at the
+ * value start — a Windows drive path carries ONE backslash (C:\\Users\\me), so a
+ * pattern requiring two never fires on a real one. */
+function isMachinePath(value) {
+  return /^~[\/\\]/.test(value)
+    || /^\/(Users|home)\//.test(value)
+    || /^[A-Za-z]:[\/\\]/.test(value);
+}
+
 // ---- Config templates -------------------------------------------------
 // `configTemplates` is the canonical 0.20 spelling; `configs` is the frozen
 // 0.19 spelling, readable only so already-published 0.19 tags stay consumable.
@@ -114,20 +146,30 @@ for (const [name, spec] of Object.entries(templates)) {
   // `oas install` applies none of them and materialization never copies them.
   // Placing one inside a capability root would ship a file that looks like
   // live policy to anyone reading the materialized artifact.
+  // Compare RESOLVED paths, not spelled ones. A template symlinked into a
+  // capability root reads as outside it lexically while its real bytes are
+  // materialized with the capability — the exact leak this rule exists to stop.
+  const realTemplate = realpathOrUndefined(join(root, spec.path));
   for (const [index, capabilityDir] of (Array.isArray(packageManifest?.capabilities) ? packageManifest.capabilities : []).entries()) {
     if (typeof capabilityDir !== "string" || capabilityDir === "." || capabilityDir.split(/[\\/]+/).includes("..")) continue;
-    const prefix = capabilityDir.replace(/\/+$/, "") + "/";
-    if (spec.path.startsWith(prefix)) {
+    const realCapability = realpathOrUndefined(join(root, capabilityDir));
+    const inside = realTemplate && realCapability
+      ? realTemplate === realCapability || realTemplate.startsWith(realCapability + sep)
+      : spec.path.startsWith(capabilityDir.replace(/\/+$/, "") + "/");
+    if (inside) {
       report(at(name, "path"), `config template must not live inside capability root ${JSON.stringify(packageManifest.capabilities[index])} — templates are package source material, not materialized bytes`);
     }
   }
-  // Portability: a shipped template is read by strangers on other machines.
+  // Portability: a shipped template is read by strangers on other machines, so
+  // no machine path may survive into it. Inspect the SCALAR VALUE rather than
+  // the raw line: quoting ("/Users/x") and list items (- /Users/x) both defeat
+  // a whitespace-boundary match on the line, and both are ordinary YAML.
   const templateFile = join(root, spec.path);
   if (existsSync(templateFile)) {
     const text = readFileSync(templateFile, "utf8");
     for (const line of text.split("\n")) {
-      const value = line.replace(/#.*$/, "");
-      if (/(^|\s)(\/Users\/|\/home\/|[A-Za-z]:\\\\)/.test(value) || /(^|\s)~\//.test(value)) {
+      const offending = scalarValues(line).find(isMachinePath);
+      if (offending) {
         report(at(name, "path"), `config template is not portable — it embeds a machine path: ${line.trim()}`);
         break;
       }

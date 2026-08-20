@@ -263,7 +263,13 @@ const skipV1 = skip || (hasV1 ? false : `tag ${V1_TAG} is not present (shallow c
 test("probe: the published v1.0.0 payload still installs on the pinned released kernel", { skip: skipV1 }, (t) => {
   const staging = mkdtempSync(join(tmpdir(), "oas-authoring-v1-"));
   t.after(() => rmSync(staging, { recursive: true, force: true }));
-  execFileSync("sh", ["-c", `git archive ${V1_TAG} oas-package | tar -x -C ${JSON.stringify(staging)} --strip-components=1`], { cwd: ROOT });
+  // NO SHELL. `staging` derives from TMPDIR, which the environment controls;
+  // interpolating it into `sh -c` lets a directory name containing $(...) run
+  // arbitrary commands during `npm test`, and quoting does not stop command
+  // substitution. Pipe the archive through this process instead, passing every
+  // path as an argv element that no shell ever parses.
+  const archive = execFileSync("git", ["archive", V1_TAG, "oas-package"], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 });
+  execFileSync("tar", ["-x", "-C", staging, "--strip-components=1"], { input: archive });
 
   const manifest = readJson(join(staging, "oas-package.json"));
   assert.equal(manifest.version, "1.0.0");

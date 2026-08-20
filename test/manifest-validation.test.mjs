@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative as relativePath, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,7 @@ const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 /** Build a throwaway repo with the real validator + real schemas and run it.
  * `overrides` are merged into the package manifest; `files` are extra payload
  * files written relative to the payload root. */
-function runFixture(t, capabilityDirs, overrides = {}, files = {}) {
+function runFixture(t, capabilityDirs, overrides = {}, files = {}, links = {}) {
   const fixture = mkdtempSync(join(tmpdir(), "oas-manifest-negative-"));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   mkdirSync(join(fixture, "scripts"), { recursive: true });
@@ -48,6 +48,14 @@ function runFixture(t, capabilityDirs, overrides = {}, files = {}) {
     const path = join(fixture, "oas-package", relative);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, contents);
+  }
+
+  // `links` maps a payload-relative link path to its payload-relative target,
+  // written after the regular files so the target already exists.
+  for (const [relative, target] of Object.entries(links)) {
+    const path = join(fixture, "oas-package", relative);
+    mkdirSync(dirname(path), { recursive: true });
+    symlinkSync(relativePath(dirname(path), join(fixture, "oas-package", target)) || target, path);
   }
 
   return spawnSync(process.execPath, [join(fixture, "scripts", "validate-manifests.mjs")], {
@@ -160,4 +168,56 @@ test("validator accepts a well-formed dedicated-root package with a canonical te
   }, canonicalTemplate);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Validated .* and 1 capability manifest\(s\)/);
+});
+
+test("validator rejects a config template SYMLINKED into a capability root", (t) => {
+  // Lexically the declared path sits outside the capability; the real bytes do
+  // not. Only resolved-path containment catches this, and it is the shape that
+  // would actually ship a template inside a materialized artifact.
+  const result = runFixture(t, ["capabilities/thing"], {
+    configTemplates: { default: { path: "config-templates/default/oas-config.yaml" } },
+  }, {
+    "capabilities/thing/oas.json": JSON.stringify({
+      capability: "test.package",
+      version: "1.0.0",
+      compatibility: { oas: ">=0.20.0" },
+      description: "Fixture.",
+      requires: [],
+    }, null, 2) + "\n",
+    "capabilities/thing/smuggled-template.yaml": TEMPLATE,
+  }, {
+    "config-templates/default/oas-config.yaml": "capabilities/thing/smuggled-template.yaml",
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /templates are package source material, not materialized bytes/);
+});
+
+test("validator catches machine paths that quoting or Windows drives would hide", (t) => {
+  for (const [label, value] of [
+    ["windows drive with a single backslash", "repo: C:\\Users\\name"],
+    ["double-quoted unix path", 'repo: "/Users/someone/checkout"'],
+    ["single-quoted unix path", "repo: '/home/someone/checkout'"],
+    ["home-relative path", "repo: ~/checkout"],
+    ["sequence item", "roots:\n  - /Users/someone/checkout"],
+  ]) {
+    const result = runFixture(t, ["capabilities/thing"], {
+      configTemplates: { default: { path: "config-templates/default/oas-config.yaml" } },
+    }, { "config-templates/default/oas-config.yaml": `name: fixture\n${value}\n` });
+    assert.equal(result.status, 1, `${label} must be rejected`);
+    assert.match(result.stderr, /not portable — it embeds a machine path/, label);
+  }
+});
+
+test("validator does not mistake ordinary template prose for a machine path", (t) => {
+  const result = runFixture(t, ["capabilities/thing"], {
+    configTemplates: { default: { path: "config-templates/default/oas-config.yaml", default: true } },
+  }, {
+    "config-templates/default/oas-config.yaml":
+      "name: fixture\n" +
+      "# oas init --package fixture   # adoption is explicit\n" +
+      "agent-types:\n" +
+      "  authors:\n" +
+      "    description: Agents that author capabilities, skills and souls\n",
+  });
+  assert.equal(result.status, 0, result.stderr);
 });

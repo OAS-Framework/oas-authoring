@@ -111,10 +111,24 @@ test("the config template targets agent types as a MAPPING, never a YAML block l
 });
 
 test("the repository's dev package version tracks the distributed package version", () => {
-  const repo = JSON.parse(readFileSync(join(PAYLOAD, "..", "package.json"), "utf8"));
+  const repoRoot = resolve(PAYLOAD, "..");
+  const repo = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
   const outer = JSON.parse(readPayload("oas-package.json"));
   // The repo package.json is private dev tooling and is never published, but a
   // drifting version makes every release conversation ambiguous.
   assert.equal(repo.version, outer.version);
   assert.equal(repo.private, true);
+
+  // The lockfile carries its own copy of the root version, in two places, and
+  // a plain version bump does NOT update it — `npm install --package-lock-only`
+  // does. Asserting only package.json leaves the release metadata internally
+  // inconsistent while this test still passes.
+  const lock = JSON.parse(readFileSync(join(repoRoot, "package-lock.json"), "utf8"));
+  assert.equal(lock.version, outer.version, "package-lock.json root version has drifted — run `npm install --package-lock-only`");
+  assert.equal(lock.packages[""].version, outer.version, "package-lock.json packages[\"\"] version has drifted");
+
+  // The consumer probes are only meaningful against the kernel this package
+  // claims compatibility with, and `npm ci` installs whatever the lock pins.
+  assert.equal(lock.packages["node_modules/@oas-framework/oas"].version, "0.20.0");
+  assert.equal(outer.compatibility.oas, ">=0.20.0");
 });
